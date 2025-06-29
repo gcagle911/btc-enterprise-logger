@@ -92,6 +92,46 @@ def serve_file():
 @app.route('/hourly')
 def serve_hourly():
     return send_file('hourly_data.csv', mimetype='text/csv')
+
+# Log a clean hourly snapshot
+def log_hourly_data():
+    last_logged_hour = None
+    while True:
+        now = datetime.utcnow()
+        current_hour = now.strftime('%Y-%m-%d %H')
+
+        if current_hour != last_logged_hour:
+            entry = fetch_data()
+            if entry:
+                with open('hourly_data.csv', 'a', newline='') as f:
+                    writer = csv.writer(f)
+                    if f.tell() == 0:
+                        writer.writerow([
+                            'entry_id',
+                            'timestamp',
+                            'symbol',
+                            'exchange',
+                            'price',
+                            'bid',
+                            'ask',
+                            'mid_price',
+                            'spread',
+                            'volume_usd'
+                        ])
+                    writer.writerow([
+                        entry['entry_id'],
+                        entry['timestamp'],
+                        entry['symbol'],
+                        entry['exchange'],
+                        entry['price'],
+                        entry['bid'],
+                        entry['ask'],
+                        entry['mid_price'],
+                        entry['spread'],
+                        entry['volume_usd']
+                    ])
+            last_logged_hour = current_hour
+        time.sleep(30)
 # Start logging in a separate thread
 def start_logger():
     t1 = threading.Thread(target=log_data)
