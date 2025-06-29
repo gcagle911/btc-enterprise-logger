@@ -89,6 +89,9 @@ def log_data():
 def serve_file():
     return send_file(CSV_FILE, mimetype='text/csv')
 
+@app.route('/hourly')
+def serve_hourly():
+    return send_file('hourly_data.csv', mimetype='text/csv')
 # Start logging in a separate thread
 def start_logger():
     t1 = threading.Thread(target=log_data)
