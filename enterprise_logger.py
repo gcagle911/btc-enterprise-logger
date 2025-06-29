@@ -91,11 +91,54 @@ def serve_file():
 
 # Start logging in a separate thread
 def start_logger():
-    t = threading.Thread(target=log_data)
-    t.daemon = True
-    t.start()
+    t1 = threading.Thread(target=log_data)
+    t1.daemon = True
+    t1.start()
+
+    t2 = threading.Thread(target=log_hourly_data)
+    t2.daemon = True
+    t2.start()
 
 if __name__ == '__main__':
     initialize_csv()
     start_logger()
     app.run(host='0.0.0.0', port=10001)
+# Log a clean hourly snapshot
+def log_hourly_data():
+    last_logged_hour = None
+    while True:
+        now = datetime.utcnow()
+        current_hour = now.strftime('%Y-%m-%d %H')
+
+        if current_hour != last_logged_hour:
+            entry = fetch_data()
+            if entry:
+                with open('hourly_data.csv', 'a', newline='') as f:
+                    writer = csv.writer(f)
+                    if f.tell() == 0:
+                        writer.writerow([
+                            'entry_id',
+                            'timestamp',
+                            'symbol',
+                            'exchange',
+                            'price',
+                            'bid',
+                            'ask',
+                            'mid_price',
+                            'spread',
+                            'volume_usd'
+                        ])
+                    writer.writerow([
+                        entry['entry_id'],
+                        entry['timestamp'],
+                        entry['symbol'],
+                        entry['exchange'],
+                        entry['price'],
+                        entry['bid'],
+                        entry['ask'],
+                        entry['mid_price'],
+                        entry['spread'],
+                        entry['volume_usd']
+                    ])
+            last_logged_hour = current_hour
+        time.sleep(30)  # check twice per minute
