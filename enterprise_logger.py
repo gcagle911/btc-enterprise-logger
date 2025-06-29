@@ -1,69 +1,101 @@
 import requests
 import csv
 import time
+import uuid
 from datetime import datetime
 from flask import Flask, send_file
 import threading
 
-CSV_FILE = 'enterprise_data.csv'  # ← New CSV filename
+CSV_FILE = 'data.csv'
+EXCHANGE_NAME = 'Coinbase'
+SYMBOL = 'BTC-USD'
+LOG_INTERVAL_SECONDS = 5  # Log every 5 seconds
 
-# Create CSV if not exists
-try:
-    with open(CSV_FILE, 'x', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['timestamp', 'price', 'bid', 'ask', 'spread', 'volume'])
-except FileExistsError:
-    pass
-
-def fetch_coinbase_data():
-    ticker_url = 'https://api.coinbase.com/v2/exchange-rates?currency=BTC'
-    book_url = 'https://api.exchange.coinbase.com/products/BTC-USD/book?level=1'
-
-    ticker = requests.get(ticker_url).json()
-    book = requests.get(book_url).json()
-
-    price = float(ticker['data']['rates']['USD'])
-
-    if 'bids' in book and 'asks' in book and book['bids'] and book['asks']:
-        bid = float(book['bids'][0][0])
-        ask = float(book['asks'][0][0])
-    else:
-        bid = price * 0.999
-        ask = price * 1.001
-
-    spread = ask - bid
-    volume = 0.0
-    timestamp = datetime.utcnow().isoformat()
-
-    return [timestamp, price, bid, ask, spread, volume]
-
-def log_data():
-    try:
-        data = fetch_coinbase_data()
-        with open(CSV_FILE, 'a', newline='') as f:
-            csv.writer(f).writerow(data)
-        print(f"Logged: {data}")
-    except Exception as e:
-        print(f"Error: {e}")
-
-# --- Flask server setup ---
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return '<h1>Enterprise BTC Logger</h1><a href="/enterprise_data.csv">Download CSV</a>'
+# Create CSV with headers if it doesn't exist
+def initialize_csv():
+    try:
+        with open(CSV_FILE, 'x', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'entry_id',
+                'timestamp',
+                'symbol',
+                'exchange',
+                'price',
+                'bid',
+                'ask',
+                'mid_price',
+                'spread',
+                'volume_usd'
+            ])
+    except FileExistsError:
+        pass  # Already exists
 
-@app.route('/enterprise_data.csv')
-def serve_csv():
-    return send_file(CSV_FILE)
+# Get BTC-USD ticker from Coinbase API
+def fetch_data():
+    try:
+        response = requests.get('https://api.exchange.coinbase.com/products/BTC-USD/ticker')
+        data = response.json()
 
-def start_server():
-    app.run(host='0.0.0.0', port=10001)  # ← New port
+        bid = float(data['bid'])
+        ask = float(data['ask'])
+        price = float(data['price'])
+        volume = float(data['volume'])  # USD volume
+        mid_price = (bid + ask) / 2
+        spread = ask - bid
 
-# --- Main Program ---
-if __name__ == "__main__":
-    threading.Thread(target=start_server, daemon=True).start()
-    print("Starting enterprise logger...")
+        return {
+            'entry_id': str(uuid.uuid4()),
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'symbol': SYMBOL,
+            'exchange': EXCHANGE_NAME,
+            'price': price,
+            'bid': bid,
+            'ask': ask,
+            'mid_price': mid_price,
+            'spread': spread,
+            'volume_usd': volume
+        }
+
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+# Append row to CSV
+def log_data():
     while True:
-        log_data()
-        time.sleep(60)
+        entry = fetch_data()
+        if entry:
+            with open(CSV_FILE, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    entry['entry_id'],
+                    entry['timestamp'],
+                    entry['symbol'],
+                    entry['exchange'],
+                    entry['price'],
+                    entry['bid'],
+                    entry['ask'],
+                    entry['mid_price'],
+                    entry['spread'],
+                    entry['volume_usd']
+                ])
+        time.sleep(LOG_INTERVAL_SECONDS)
+
+# Serve CSV via Flask
+@app.route('/')
+def serve_file():
+    return send_file(CSV_FILE, mimetype='text/csv')
+
+# Start logging in a separate thread
+def start_logger():
+    t = threading.Thread(target=log_data)
+    t.daemon = True
+    t.start()
+
+if __name__ == '__main__':
+    initialize_csv()
+    start_logger()
+    app.run(host='0.0.0.0', port=10001)
